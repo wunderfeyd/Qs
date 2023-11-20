@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Qs</title>
+<script src="poll.js"></script>
+<script src="gui.js"></script>
+</head>
+<body>
+<div id="messages">
+</div>
+<form onsubmit="let e = document.getElementById('text'); poll.push(e.value); e.value = ''; return false;">
+<input type="text" id="text" />
+</form>
+</body>
+</html>

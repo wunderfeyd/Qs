@@ -97,7 +97,11 @@ class QuasselDataStore {
       }
 
       $count = 0;
-      while ($count<60) {
+      while (true) {
+        if ($count==60) {
+          return "";
+        }
+
         $count++;
         flock($file, LOCK_SH);
         fseek($file, 0, SEEK_SET);
@@ -110,18 +114,27 @@ class QuasselDataStore {
         $result = $this->index($stored, $rpc);
         flock($file, LOCK_UN);
 
+        if ($rpc["type"]!==$result["type"]) {
+          return "";
+        }
+
         $uid = $result["uid"];
-        if (!isset($rpc["uid"]) || $rpc["uid"]!==$uid) {
-          $result["uid"] = $uid;
+        if ((!isset($rpc["uid"]) || $rpc["uid"]!==$uid)) {
           $result["timestamp"] = time();
-          if (isset($rpc["uid"])) {
-            $needed = $rpc["uid"];
-            $messages = array_keys($result["messages"]);
-            foreach ($messages as $message) {
-              if (!isset($result["messages"][$message]["uid"]) || $result["messages"][$message]["uid"]<=$needed) {
-                unset($result["messages"][$message]);
+          if ($result["type"]==="data") {
+          } elseif ($result["type"]==="index") {
+            $result["uid"] = $uid;
+            if (isset($rpc["uid"])) {
+              $needed = $rpc["uid"];
+              $messages = array_keys($result["messages"]);
+              foreach ($messages as $message) {
+                if (!isset($result["messages"][$message]["uid"]) || $result["messages"][$message]["uid"]<=$needed) {
+                  unset($result["messages"][$message]);
+                }
               }
             }
+          } else {
+            return "";
           }
 
           break;
@@ -331,15 +344,22 @@ class QuasselWebStore {
     $merged = array();
     $merged["messages"] = array();
     $merged["uids"] = array();
+    $merged["node"] = $data["node"];
     foreach ($servers as $url => $dht) {
       $content = curl_multi_getcontent($requests[$url]);
       $stored = json_decode($content, true);
       $hash = bin2hex($dht["hash"]);
-      $merged["uids"][$hash] = $stored["uid"];
+      if (isset($stored)) {
+        $merged["uids"][$hash] = $stored["uid"];
+      }
 
       // TODO: merge indexes
       if (isset($stored["messages"])) {
         $merged["messages"] = $stored["messages"];
+      }
+
+      if (isset($stored["data"])) {
+        $merged["data"] = $stored["data"];
       }
 
       curl_close($requests[$url]);
@@ -439,10 +459,16 @@ class QuasselChat {
     return $this->dht->send($this->hashed, $rpcIndexUpdate);
   }
 
-  // Poll chat message
-  public function poll(array $uids) : array {
-    $rpcIndexUpdate = array("node" => bin2hex($this->hashed), "chat" => bin2hex($this->hashed), "type" => "index");
-    return $this->dht->receive($this->hashed, $rpcIndexUpdate, $uids);
+  // Poll index
+  public function index(array $uids) : array {
+    $rpcIndexPoll = array("node" => bin2hex($this->hashed), "chat" => bin2hex($this->hashed), "type" => "index");
+    return $this->dht->receive($this->hashed, $rpcIndexPoll, $uids);
+  }
+
+  // Poll message
+  public function message(string $message) : array {
+    $rpcMessagePoll = array("node" => $message, "chat" => bin2hex($this->hashed), "type" => "data");
+    return $this->dht->receive($this->hashed, $rpcMessagePoll, array());
   }
 }
 
@@ -464,7 +490,12 @@ class QuasselCore {
 
   public function pollMessages(string $node, array $uids) : array {
     $chat = new QuasselChat($this->dht, $node);
-    return $chat->poll($uids);
+    return $chat->index($uids);
+  }
+
+  public function pollMessage(string $node, string $message) : array {
+    $chat = new QuasselChat($this->dht, $node);
+    return $chat->message($message);
   }
 }
 ?>
